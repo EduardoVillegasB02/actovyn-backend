@@ -5,6 +5,12 @@ FROM node:22-slim AS builder
 
 WORKDIR /app
 
+# Las imágenes slim vienen sin OpenSSL y Prisma lo necesita para su motor de
+# migraciones. Sin esto avisa de que no detecta libssl y puede fallar.
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 # Sin esto corepack pregunta antes de descargar pnpm, y en un build sin
 # terminal esa pregunta hace fallar el paso.
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
@@ -21,6 +27,14 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build
 
+# Fija el formato de módulo de todo lo compilado.
+#
+# Sin esto, Node busca el package.json más cercano para decidir si un .js es
+# CommonJS o ESM, y si queda ambiguo intenta adivinarlo por la sintaxis. El
+# cliente de Prisma que tsc compila a CommonJS acababa cargándose como ESM y
+# reventaba con "exports is not defined". Este archivo corta esa búsqueda aquí.
+RUN printf '{"type":"commonjs"}' > dist/package.json
+
 # Quita las dependencias de desarrollo del node_modules que ya existe, sin
 # reinstalar nada ni volver a lanzar scripts.
 RUN pnpm prune --prod
@@ -31,6 +45,10 @@ FROM node:22-slim AS runner
 
 ENV NODE_ENV=production
 WORKDIR /app
+
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 # Ya viene todo resuelto del builder: aquí no se instala nada.
 COPY --from=builder /app/node_modules ./node_modules

@@ -6,6 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "packageManager": "pnpm@10.30.3",
+  "type": "commonjs",
   "engines": {
     "node": ">=22.12.0"
   },
