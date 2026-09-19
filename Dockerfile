@@ -19,12 +19,22 @@ RUN corepack enable
 # Se instala UNA vez, con todo, porque compilar necesita las dependencias de
 # desarrollo. Después se podan. Instalar dos veces era frágil: la segunda
 # vuelve a ejecutar el postinstall en un entorno recortado.
+#
+# El tsconfig VA EN ESTA LISTA y no es opcional: el postinstall lanza
+# `prisma generate`, y Prisma mira el `module` del tsconfig para decidir si
+# emite el cliente en CommonJS o en ESM. Sin él genera la variante ESM, con
+# `import.meta.url` dentro, que luego revienta al requerirla desde CommonJS.
 COPY package.json pnpm-lock.yaml ./
+COPY tsconfig.json tsconfig.build.json ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 RUN pnpm install --frozen-lockfile
 
 COPY . .
+
+# Se regenera con el proyecto entero delante. Es barato y garantiza que el
+# cliente corresponde al estado final, no al recorte del paso anterior.
+RUN pnpm prisma generate
 RUN pnpm build
 
 # Fija el formato de módulo de todo lo compilado.
@@ -34,6 +44,13 @@ RUN pnpm build
 # cliente de Prisma que tsc compila a CommonJS acababa cargándose como ESM y
 # reventaba con "exports is not defined". Este archivo corta esa búsqueda aquí.
 RUN printf '{"type":"commonjs"}' > dist/package.json
+
+# Corta el despliegue aquí si el cliente salió en ESM. Es la comprobación que
+# faltaba: este fallo no se ve al construir, solo al arrancar en producción.
+RUN if grep -rq "import\.meta" dist/generated/prisma/; then \
+      echo "ERROR: el cliente de Prisma se generó en ESM y no se puede requerir desde CommonJS"; \
+      exit 1; \
+    fi
 
 # Quita las dependencias de desarrollo del node_modules que ya existe, sin
 # reinstalar nada ni volver a lanzar scripts.
