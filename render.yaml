@@ -1,0 +1,58 @@
+  - type: web
+    name: actovyn-backend
+    runtime: node
+    plan: free
+    region: oregon
+
+    # Render reinstala e instala en cada despliegue; el postinstall del paquete
+    # genera el cliente de Prisma, que no está en Git.
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    # `release` migra y luego arranca. Así un despliegue nunca queda con el código nuevo contra un esquema viejo.
+    startCommand: pnpm release
+
+    # Render considera vivo el servicio cuando esto responde 200. Es la ruta pública de salud, sin token.
+    healthCheckPath: /api
+    autoDeploy: true
+
+    envVars:
+      # Node 22 no arranca.
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: NODE_ENV
+        value: production
+
+      # Render los genera él y no pasan por Git ni por tu portapapeles.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MAINTENANCE_TOKEN
+        generateValue: true
+
+      # DATABASE_URL: pooler de Supabase
+      # DIRECT_URL: conexión directa, solo migraciones
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+
+      # El origen exacto del frontend. Sin comodín: con cookies el navegador rechaza la respuesta.
+      - key: CORS_ORIGINS
+        sync: false
+      - key: AI_KEY
+        sync: false
+
+      - key: JWT_EXPIRES_IN
+        value: "900"
+      - key: AUTH_REFRESH_DAYS
+        value: "30"
+
+      # El front y el API quedan en dominios distintos.
+      - key: AUTH_COOKIE_CROSS_SITE
+        value: "true"
+      - key: AUTH_REFRESH_IN_BODY
+        value: "false"
+
+      # AI
+      - key: AI_PROVIDER
+        value: fixture
+      - key: AI_MODEL
+        value: gpt-4o-mini

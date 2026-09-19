@@ -36,9 +36,9 @@ La API queda en `http://localhost:$PORT/api`, la documentación Swagger en
 `/api/docs` y el contrato en JSON en `/api/docs-json`, que sirve para generar
 los tipos del cliente en lugar de escribirlos a mano.
 
-## Despliegue en Supabase y Koyeb
+## Despliegue en Supabase y Render
 
-Supabase pone la base de datos y Koyeb el servidor. Van separados a propósito:
+Supabase pone la base de datos y Render el servidor. Van separados a propósito:
 así puedes cambiar de host sin migrar datos.
 
 **1. Supabase.** Crea el proyecto y copia dos cadenas de conexión distintas de
@@ -47,62 +47,67 @@ la que usa la app en marcha. La **directa**, puerto 5432, es `DIRECT_URL` y
 solo la usan las migraciones, porque `migrate` necesita bloqueos de sesión que
 el pooler no conserva. A la del pooler añádele `?pgbouncer=true&connection_limit=1`.
 
-**2. Migra y carga la demo**, desde tu máquina con el `.env` completo:
+**2. Carga la demo** desde tu máquina, con el `.env` completo:
 
 ```bash
 pnpm db:deploy   # crea las tablas en Supabase
 pnpm db:seed     # cuenta demo con su historial
 ```
 
-**3. Koyeb.** Crea un servicio desde el repositorio de Git y elige **Dockerfile**
-como método de build. No hace falta configurar comandos: el Dockerfile ya
-instala, genera el cliente de Prisma, compila, migra y arranca.
+Las migraciones también corren solas en cada despliegue, así que este paso es
+sobre todo para dejar el historial de la demo cargado.
 
-| Ajuste | Valor |
-| --- | --- |
-| Builder | Dockerfile |
-| Puerto | 8000 |
-| Health check | HTTP en `/api` |
+**3. Render.** En el panel, New y luego Blueprint, apuntando al repositorio. El
+archivo `render.yaml` ya define el servicio entero: plan gratuito, comandos de
+build y arranque, health check en `/api` y las variables de entorno.
 
-El puerto lo inyecta Koyeb en `PORT` y la app escucha en `0.0.0.0`, que es lo
-que espera su balanceador.
+Solo te pedirá cuatro valores, que son los que no deben estar en Git:
+`DATABASE_URL`, `DIRECT_URL`, `CORS_ORIGINS` y `AI_KEY`. El `JWT_SECRET` y el
+`MAINTENANCE_TOKEN` los genera Render solo.
 
-**4. Variables de entorno en Koyeb.** Todas las de la tabla de abajo. Marca
-como secretas `DATABASE_URL`, `DIRECT_URL`, `JWT_SECRET`, `AI_KEY` y
-`MAINTENANCE_TOKEN`. Genera el secreto de firma con `openssl rand -base64 48`.
+**4. El frontend.** Apúntalo a `https://TU-APP.onrender.com/api` y pon ese mismo
+origen en `CORS_ORIGINS`. Como estarán en dominios distintos, `render.yaml` ya
+deja `AUTH_COOKIE_CROSS_SITE=true`, que exige HTTPS en ambos lados. Si aun así
+la cookie te da problemas, `AUTH_REFRESH_IN_BODY=true` devuelve el refresh en
+el cuerpo y lo guarda el cliente.
 
-**5. El frontend.** Apúntalo a `https://TU-APP.koyeb.app/api` y pon ese mismo
-origen en `CORS_ORIGINS`. Como estarán en dominios distintos, deja
-`AUTH_COOKIE_CROSS_SITE=true`, que exige HTTPS en ambos lados. Si aun así la
-cookie te da problemas, `AUTH_REFRESH_IN_BODY=true` devuelve el refresh en el
-cuerpo y lo guarda el cliente.
+### El plan gratuito se duerme
 
-### Si la instancia se duerme
+Es el punto a vigilar. Render suspende el servicio gratuito tras un rato sin
+tráfico, y despertarlo tarda bastante. Eso trae dos problemas.
 
-En un plan gratuito la instancia puede suspenderse por inactividad, y un
-proceso dormido no ejecuta su propio cron: los borradores caducados no se
-limpiarían nunca.
+El primero es que quien abra el link se come la espera, y en una presentación
+eso se nota. El segundo es que un proceso dormido no ejecuta su propio cron, así
+que los borradores caducados no se limpiarían nunca.
 
-Para eso está `POST /api/maintenance/purge-drafts`, que hace la misma limpieza
-y se dispara desde fuera con la cabecera `x-maintenance-token`. Apúntale un cron
-externo gratuito cada hora y de paso mantienes la instancia despierta:
+Los dos se arreglan con lo mismo. `POST /api/maintenance/purge-drafts` hace esa
+limpieza y se dispara desde fuera con la cabecera `x-maintenance-token`.
+Apúntale un cron externo gratuito, tipo cron-job.org, cada diez o quince
+minutos: limpia y de paso mantiene la instancia despierta.
 
 ```bash
-curl -X POST https://TU-APP.koyeb.app/api/maintenance/purge-drafts \
+curl -X POST https://TU-APP.onrender.com/api/maintenance/purge-drafts \
   -H "x-maintenance-token: $MAINTENANCE_TOKEN"
 ```
 
-Sin `MAINTENANCE_TOKEN` configurado el endpoint queda cerrado.
+Copia el valor que Render generó para `MAINTENANCE_TOKEN` desde el panel del
+servicio. Si lo dejas vacío, el endpoint queda cerrado.
 
 ### Dos cosas que no puedes cambiar sin romper algo
 
 **Node 22 o superior.** No es una preferencia: `uuid` v14 solo trae ESM y la
 app compila a CommonJS, así que depende de poder requerir un módulo ESM. Con
-Node 20 la app no arranca. Está fijado en `engines` y en el Dockerfile.
+Node 20 la app no arranca. Está fijado en `engines`, en `.node-version` y en la
+variable `NODE_VERSION` del blueprint.
 
 **Una sola instancia.** El limitador de peticiones cuenta en memoria. Si
 escalas a varias réplicas, el cupo se multiplica por el número de réplicas.
 Para escalar hay que mover ese contador a Redis primero.
+
+El `Dockerfile` sigue en el repositorio y funciona igual. Si prefieres que
+Render construya con él en vez de con su entorno de Node, cambia `runtime: node`
+por `runtime: docker` en `render.yaml` y borra las líneas de `buildCommand` y
+`startCommand`.
 
 ## Variables de entorno
 
