@@ -1,0 +1,29 @@
+# Todo lo que no debe entrar en la imagen: se instala o se genera dentro.
+node_modules
+dist
+generated
+coverage
+
+# Secretos
+.env
+.env.*
+!.env.template
+
+.git
+.gitignore
+.github
+
+# Herramientas de desarrollo
+.agents
+.claude
+.windsurf
+.vscode
+.idea
+skills-lock.json
+eslint.config.mjs
+.prettierrc
+test
+**/*.spec.ts
+README.md
+Dockerfile
+.dockerignore

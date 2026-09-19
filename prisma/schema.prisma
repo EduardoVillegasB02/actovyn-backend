@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum IntentionStatus {
+  DRAFT
+  PENDING
+  COMPLETED
+  FAILED
+  RESCHEDULED
+  CANCELLED
+}
+
+enum Difficulty {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum EventType {
+  CREATED
+  PREDICTED
+  RESCHEDULED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum RiskLevel {
+  VERY_LIKELY
+  LIKELY
+  UNCERTAIN
+  HIGH_RISK
+  VERY_HIGH_RISK
+}
+
+enum ConfidenceLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model Intention {
+  id                          String                  @id @default(uuid())
+  user_id                     String
+  objective                   String
+  category                    String?
+  raw_message                 String
+  local_hour                  Int?
+  weekday                     Int?
+  scheduled_at                DateTime?
+  closed_at                   DateTime?
+  created_at                  DateTime                @default(now())
+  updated_at                  DateTime                @updatedAt
+  difficulty                  Difficulty
+  status                      IntentionStatus         @default(DRAFT)
+  // Cuando una PENDING se reprograma, la nueva apunta a la original.
+  rescheduled_from_id         String?
+  user                        User                    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  rescheduled_from            Intention?              @relation("IntentionReschedule", fields: [rescheduled_from_id], references: [id], onDelete: SetNull)
+  reschedules                 Intention[]             @relation("IntentionReschedule")
+  predictions                 Prediction[]
+  events                      IntentionEvent[]
+  @@index([user_id, status])
+  @@index([user_id, local_hour])
+  @@index([user_id, closed_at])
+  @@index([user_id, status, scheduled_at])
+  @@index([user_id, status, created_at])
+  @@index([status, created_at])
+  @@map("intention")
+}
+
+model IntentionEvent {
+  id                          String                  @id @default(uuid())
+  intention_id                String
+  occurred_at                 DateTime                @default(now())
+  metadata                    Json?
+  type                        EventType
+  intention                   Intention               @relation(fields: [intention_id], references: [id], onDelete: Cascade)
+  @@index([intention_id, occurred_at])
+  @@map("intention_event")
+}
+
+model Prediction {
+  id                          String                  @id @default(uuid())
+  intention_id                String
+  commitment_score            Float
+  sample_size                 Int
+  historical_adherence        Float
+  time_compatibility          Float
+  difficulty_fit              Float
+  recent_consistency          Float
+  linguistic_confidence       Float
+  capped_by                   String[]                @default([])
+  model_version               String                  @default("score-v1")
+  created_at                  DateTime                @default(now())
+  weights                     Json
+  risk                        RiskLevel
+  confidence                  ConfidenceLevel
+  intention                   Intention               @relation(fields: [intention_id], references: [id], onDelete: Cascade)
+  recommendation              Recommendation?
+  @@index([intention_id, created_at])
+  @@map("prediction")
+}
+
+model Recommendation {
+  id                          String                  @id @default(uuid())
+  prediction_id               String                  @unique
+  reason                      String
+  suggestion                  String
+  accepted                    Boolean?
+  suggested_at                DateTime?
+  created_at                  DateTime                @default(now())
+  prediction                  Prediction              @relation(fields: [prediction_id], references: [id], onDelete: Cascade)
+  @@map("recommendation")
+}
+
+model User {
+  id                          String                  @id @default(uuid())
+  // email y password_hash son nulos en las cuentas de invitado.
+  email                       String?                 @unique
+  password_hash               String?
+  name                        String
+  lastname                    String
+  is_guest                    Boolean                 @default(false)
+  // IANA. Con ella se derivan local_hour y weekday de cada intención.
+  timezone                    String                  @default("America/Lima")
+  created_at                  DateTime                @default(now())
+  updated_at                  DateTime                @updatedAt
+  intentions                  Intention[]
+  refresh_tokens              RefreshToken[]
+  @@map("user")
+}
+
+model RefreshToken {
+  id                          String                  @id @default(uuid())
+  user_id                     String
+  // Solo el hash: si se filtra la tabla, los tokens no sirven.
+  token_hash                  String                  @unique
+  expires_at                  DateTime
+  revoked_at                  DateTime?
+  created_at                  DateTime                @default(now())
+  user                        User                    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  @@index([user_id, revoked_at])
+  @@map("refresh_token")
+}
